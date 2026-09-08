@@ -240,10 +240,11 @@ const clamp=(v,a,b)=>Math.min(b,Math.max(a,v));
 const r0=v=>Math.round(v);
 
 const DEF={staffH:1600,patientH:1700,posture:"stand",deskH:700,counterH:1020,seatH:420,seatAuto:true,
-  deskDepth:500,counterDepth:330,topThk:30,deskThk:25,monInch:21.5,monTilt:6,monOffset:0,printer:"desk"};
+  deskDepth:500,counterDepth:330,overhang:150,topThk:30,deskThk:25,monInch:21.5,monTilt:6,monOffset:0,printer:"desk"};
 let S=Object.assign({},DEF);
 try{const j=localStorage.getItem("counter-sim");if(j)S=Object.assign(S,JSON.parse(j));}catch(e){}
 if(["desk","counter","none"].indexOf(S.printer)<0)S.printer="desk";
+if(typeof S.overhang!=="number")S.overhang=DEF.overhang;
 const PRN={d:380,h:300,clear:420};
 const save=()=>{try{localStorage.setItem("counter-sim",JSON.stringify(S));}catch(e){}};
 
@@ -342,6 +343,14 @@ function metrics(st){
   const ang=Math.atan2(sf.eyeH-(mon.bottom+mon.vert/2),mon.dist)*180/Math.PI;
   M.staff.push({t:"モニター中心への俯角",n:r0(ang),u:"°",m:"10〜35°が最適",j:grade(ang,10,35,0,45),key:"angle"});
   M.staff.push({t:"視距離（目〜画面）",n:r0(mon.dist),u:"mm",m:"500〜800mm",j:grade(mon.dist,500,800,420,950),key:"dist"});
+  const edgeX=-st.overhang;
+  const reachNeed=Math.sqrt(Math.pow(sf.shoulder.x-edgeX,2)+Math.pow(st.counterH-sf.shoulder.y,2));
+  const reachHave=sf.a.arm+130;
+  M.staff.push({t:"座ったままカウンター天板に届くか",n:(reachHave-reachNeed>0?"+":"")+r0(reachHave-reachNeed),u:"mm",
+    m:"上肢長+前傾 "+r0(reachHave)+" に対し 天板手前端まで "+r0(reachNeed),j:grade(reachHave-reachNeed,0,3000,-60,3000),key:"reach"});
+  const openD=st.deskDepth-st.overhang;
+  M.staff.push({t:"持ち出し下を除くデスク開口奥行",n:r0(openD),u:"mm",
+    m:"450mm以上（持ち出し150mm超は補強金物が必要）",j:grade(openD,450,3000,330,3000),key:"open"});
   const seeTop=sf.eyeH-st.counterH;
   M.staff.push({t:"座ったまま天板上が見えるか",n:(seeTop>0?"+":"")+r0(seeTop),u:"mm",m:"目線がカウンター天板より上（+80以上）",j:grade(seeTop,80,900,10,900),key:"seetop"});
 
@@ -375,7 +384,7 @@ function metrics(st){
   const gaze=Math.atan2(dy,dx)*180/Math.PI;
   M.common.push({t:"患者→スタッフの見下ろし角",n:r0(gaze),u:"°",m:"25°以下（見下ろされ感が出にくい）",j:grade(gaze,-10,25,-20,35),key:"gaze"});
   const monTopPt={x:0,y:mon.top};
-  const solids=[{x0:2,x1:st.counterDepth-2,y0:st.counterH-st.topThk+2,y1:st.counterH-2},
+  const solids=[{x0:-st.overhang+2,x1:st.counterDepth-2,y0:st.counterH-st.topThk+2,y1:st.counterH-2},
                 {x0:2,x1:98,y0:2,y1:st.counterH-st.topThk-2}];
   const hidden=solids.some(r=>segRect(pt.eye,monTopPt,r));
   const over=r0(mon.top-(st.counterH-st.topThk));
@@ -400,9 +409,11 @@ function dimV(x,y1,y2,label,extFrom){
   if(extFrom!==undefined)s+='<line x1="'+X(extFrom)+'" y1="'+a+'" x2="'+(sx+(extFrom<x?18:-18))+'" y2="'+a+'" class="ext"/><line x1="'+X(extFrom)+'" y1="'+b+'" x2="'+(sx+(extFrom<x?18:-18))+'" y2="'+b+'" class="ext"/>';
   return s+'<line x1="'+sx+'" y1="'+a+'" x2="'+sx+'" y2="'+b+'" class="dim"/><line x1="'+(sx-14)+'" y1="'+a+'" x2="'+(sx+14)+'" y2="'+a+'" class="dim"/><line x1="'+(sx-14)+'" y1="'+b+'" x2="'+(sx+14)+'" y2="'+b+'" class="dim"/><text x="'+sx+'" y="'+m+'" transform="rotate(-90 '+sx+' '+m+')" class="dimt" text-anchor="middle" dy="-13">'+label+'</text>';
 }
-function dimH(y,x1,x2,label){
+function dimH(y,x1,x2,label,left){
   const sy=Y(y),a=X(x1),b=X(x2);
-  return '<line x1="'+a+'" y1="'+sy+'" x2="'+b+'" y2="'+sy+'" class="dim"/><line x1="'+a+'" y1="'+(sy-14)+'" x2="'+a+'" y2="'+(sy+14)+'" class="dim"/><line x1="'+b+'" y1="'+(sy-14)+'" x2="'+b+'" y2="'+(sy+14)+'" class="dim"/><text x="'+((a+b)/2)+'" y="'+(sy-16)+'" class="dimt" text-anchor="middle">'+label+'</text>';
+  const t=left?'<text x="'+(a-16)+'" y="'+(sy+14)+'" class="dimt" text-anchor="end">'+label+'</text>'
+              :'<text x="'+((a+b)/2)+'" y="'+(sy-16)+'" class="dimt" text-anchor="middle">'+label+'</text>';
+  return '<line x1="'+a+'" y1="'+sy+'" x2="'+b+'" y2="'+sy+'" class="dim"/><line x1="'+a+'" y1="'+(sy-14)+'" x2="'+a+'" y2="'+(sy+14)+'" class="dim"/><line x1="'+b+'" y1="'+(sy-14)+'" x2="'+b+'" y2="'+(sy+14)+'" class="dim"/>'+t;
 }
 function figure(f,cls,wheel){
   let s="";
@@ -416,7 +427,7 @@ function figure(f,cls,wheel){
 function draw(st,M){
   const L=M.L,sf=L.staff,pt=L.patient,mon=L.mon;
   const cw=100,ch=st.counterH,cd=st.counterDepth,dd=st.deskDepth;
-  const minX=Math.min(sf.hipX-470,-dd-200,st.printer==="desk"?-PRN.d-80:0);
+  const minX=Math.min(sf.hipX-470,-dd-200,-st.overhang-120,st.printer==="desk"?-PRN.d-80:0);
   const maxX=Math.max(pt.bodyX+560,cd+260);
   const maxY=Math.max(2020,st.patientH+200,sf.seat+sf.a.sitHead+240,ch+520);
   const VB=X(minX)+" "+Y(maxY)+" "+(maxX-minX)+" "+(maxY+180);
@@ -449,7 +460,7 @@ function draw(st,M){
   s+='<line x1="'+X(minX)+'" y1="'+Y(0)+'" x2="'+X(maxX)+'" y2="'+Y(0)+'" class="floor"/>';
   for(let x=minX+40;x<maxX;x+=64){s+='<line x1="'+X(x)+'" y1="'+(Y(0)+4)+'" x2="'+X(x-34)+'" y2="'+(Y(0)+42)+'" class="hatch"/>';}
   s+=rc(0,0,cw,ch-st.topThk,"wood");
-  s+=rc(0,ch-st.topThk,cd,ch,"wood");
+  s+=rc(-st.overhang,ch-st.topThk,cd,ch,"wood");
   s+=rc(-dd,st.deskH-st.deskThk,0,st.deskH,"wood");
   s+=ln(-dd+18,0,-dd+18,st.deskH-st.deskThk,"woodd");
   const kb=ch,kx=25;
@@ -480,13 +491,14 @@ function draw(st,M){
   s+='<line x1="'+X(pt.eye.x)+'" y1="'+Y(pt.eye.y)+'" x2="'+X(sf.eye.x)+'" y2="'+Y(sf.eye.y)+'" class="sight"/>';
   s+=tx(pt.eye.x+.36*(sf.eye.x-pt.eye.x),pt.eye.y+.36*(sf.eye.y-pt.eye.y)+55,"見下ろし "+r0(M.sight.gaze)+"°","lbl sm","middle");
   s+='<line x1="'+X(pt.eye.x)+'" y1="'+Y(pt.eye.y)+'" x2="'+X(0)+'" y2="'+Y(mon.top)+'" class="sight '+(M.sight.hidden?"good":"bad")+'"/>';
-  s+=ln(-dd,sf.elbowH,-40,sf.elbowH,"ref staff")+tx(-dd+42,st.deskH-st.deskThk-95,"座位肘高 "+r0(sf.elbowH),"lbl sm");
+  s+=ln(-dd,sf.elbowH,-40,sf.elbowH,"ref staff")+tx(-dd+42,st.deskH+58,"座位肘高 "+r0(sf.elbowH),"lbl sm");
   s+=ln(cd-60,pt.elbowH,pt.bodyX,pt.elbowH,"ref patient")+tx(pt.bodyX+40,pt.elbowH+22,"肘高 "+r0(pt.elbowH),"lbl sm");
   s+=dimV(sf.hipX-330,0,st.deskH,"デスク "+st.deskH,-dd);
   s+=dimV(pt.bodyX+430,0,ch,"カウンター "+ch,cd);
-  s+=dimV(-Math.min(430,dd*.82),st.deskH,ch-st.topThk,"LCD "+r0(mon.gap));
+  s+=dimV(-Math.min(560,dd*1.05),st.deskH,ch-st.topThk,"LCD "+r0(mon.gap));
   s+=dimH(-120,-dd,0,"奥行 "+dd);
   s+=dimH(-120,0,cd,"奥行 "+cd);
+  if(st.overhang>0)s+=dimH(ch+130,-st.overhang,0,"持ち出し "+st.overhang,true);
   return {s:s,vb:VB};
 }
 
@@ -498,7 +510,8 @@ const CTL=[
  {g:"c-height",k:"counterH",l:"患者カウンター高",min:850,max:1200,step:5,u:"mm"},
  {g:"c-height",k:"seatH",l:"椅子の座面高",min:340,max:540,step:5,u:"mm"},
  {g:"c-depth",k:"deskDepth",l:"デスク奥行",min:350,max:750,step:10,u:"mm"},
- {g:"c-depth",k:"counterDepth",l:"カウンター天板奥行",min:200,max:600,step:10,u:"mm"},
+ {g:"c-depth",k:"counterDepth",l:"カウンター天板奥行（患者側）",min:200,max:600,step:10,u:"mm"},
+ {g:"c-depth",k:"overhang",l:"天板の持ち出し（スタッフ側）",min:0,max:350,step:10,u:"mm"},
  {g:"c-depth",k:"topThk",l:"カウンター天板厚",min:15,max:80,step:5,u:"mm"},
  {g:"c-depth",k:"deskThk",l:"デスク天板厚",min:15,max:60,step:5,u:"mm"},
  {g:"c-mon",k:"monInch",l:"モニターサイズ",min:17,max:27,step:.5,u:"型"},
@@ -611,7 +624,7 @@ function render(){
   const rs=sweepRange("staff"),rp=sweepRange("patient");
   const mon=M.L.mon;
   $("#tiles").innerHTML=[
-   {k:"Footprint",v:M.footprint,u:"mm",s:"什器の総奥行（デスク "+S.deskDepth+" ＋ カウンター "+S.counterDepth+"）。椅子と患者の立ち位置を含めると約 "+(M.footprint+1300)+"mm。"},
+   {k:"Footprint",v:M.footprint,u:"mm",s:"什器の総奥行（デスク "+S.deskDepth+" ＋ カウンター "+S.counterDepth+"）。持ち出し "+S.overhang+"mm はデスク上空なので床面積は増えません。"},
    {k:"LCD gap",v:r0(mon.gap),u:"mm",s:S.monInch+"型は傾斜後 "+r0(mon.vert)+"mm。余裕 "+(mon.slack>0?"+":"")+r0(mon.slack)+"mm。"},
    {k:"Staff fit",v:rs?rs[0]+"–"+rs[1]:"—",u:rs?"mm":"",s:rs?"この設定で無理なく座れるスタッフの身長域（椅子"+(S.seatAuto?"昇降あり":"固定")+"）。":"どの身長でも要調整。デスク高を見直してください。"},
    {k:"Patient fit",v:rp?rp[0]+"–"+rp[1]:"—",u:rp?"mm":"",s:rp?"このカウンター高で立って記入・操作できる身長域。":"どの身長でも要調整。カウンター高を見直してください。"}
