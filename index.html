@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="description" content="クリニック受付カウンターの断面寸法シミュレータ。スタッフの座り高さ・患者の立ち高さ・段差に吊るLCDの関係を身長別に検証します。">
+<meta name="description" content="クリニック受付カウンターの断面・3D寸法シミュレータ。スタッフの座り高さ・患者の立ち高さ・段差に吊るLCDの関係を身長別に検証します。">
 <style>:root{color-scheme:light}body{margin:0;font:14px system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style>
 <title>受付カウンター断面シミュレータ</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -74,7 +74,18 @@ h1{margin:0;font-family:var(--serif);font-weight:600;font-size:clamp(27px,3.4vw,
 .tile .k{font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink3)}
 .tile .s{font-size:12px;color:var(--ink2);line-height:1.45}
 .layout{display:grid;grid-template-columns:minmax(0,1.62fr) minmax(320px,1fr);gap:16px;align-items:start}
-.stage{background:var(--card);border:1px solid var(--line2);border-radius:3px;padding:6px 6px 0;box-shadow:var(--shadow);overflow:hidden}
+.stage{background:var(--card);border:1px solid var(--line2);border-radius:3px;padding:0 0 0;box-shadow:var(--shadow);overflow:hidden}
+.stagebar{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;padding:8px 10px;border-bottom:1px solid var(--line2)}
+.seg.sm button{font-size:12px;padding:6px 12px}
+.camrow{display:flex;flex-wrap:wrap;gap:6px;margin-left:auto}
+.camrow button{font:500 12px/1 var(--sans);padding:6px 10px;border:1px solid var(--line);border-radius:999px;
+  background:var(--card);color:var(--ink2);cursor:pointer}
+.camrow button:hover{border-color:var(--ink3);color:var(--ink)}
+.check.sm{font-size:12px}
+svg#section{padding:6px 6px 0}
+#view3d{padding:0}
+#c3{display:block;width:100%;height:min(58vh,520px);touch-action:none;cursor:grab}
+#c3:active{cursor:grabbing}
 svg#section{display:block;width:100%;height:auto}
 .legend{display:flex;flex-wrap:wrap;gap:4px 16px;padding:9px 12px 11px;border-top:1px dashed var(--line);font-size:11.5px;color:var(--ink2);font-family:var(--mono)}
 .legend i{display:inline-block;width:15px;height:0;border-top:3px solid;margin-right:5px;vertical-align:middle}
@@ -156,7 +167,22 @@ footer b{color:var(--ink);font-weight:700}
 
   <main class="layout">
     <div class="stage">
-      <svg id="section" viewBox="0 0 3060 2270" role="img" aria-label="受付カウンターの断面図"></svg>
+      <div class="stagebar">
+        <div class="seg sm" id="views">
+          <button type="button" data-v="2d" aria-pressed="true">断面図</button>
+          <button type="button" data-v="3d" aria-pressed="false">3D</button>
+        </div>
+        <label class="check sm" id="solidwrap" hidden><input type="checkbox" id="solid" checked>面を塗る</label>
+        <div class="camrow" id="cams" hidden>
+          <button type="button" data-c="iso">スタッフ側</button>
+          <button type="button" data-c="front">患者側</button>
+          <button type="button" data-c="side">真横</button>
+          <button type="button" data-c="patient">患者の目線</button>
+          <button type="button" data-c="staff">スタッフの目線</button>
+        </div>
+      </div>
+      <div id="view2d"><svg id="section" viewBox="0 0 3060 2270" role="img" aria-label="受付カウンターの断面図"></svg></div>
+      <div id="view3d" hidden><canvas id="c3"></canvas></div>
       <div class="legend">
         <span><i style="border-color:var(--wood)"></i>什器</span>
         <span><i style="border-color:var(--staff)"></i>スタッフ</span>
@@ -240,11 +266,12 @@ const clamp=(v,a,b)=>Math.min(b,Math.max(a,v));
 const r0=v=>Math.round(v);
 
 const DEF={staffH:1600,patientH:1700,posture:"stand",deskH:700,counterH:1020,seatH:420,seatAuto:true,
-  deskDepth:500,counterDepth:330,overhang:150,topThk:30,deskThk:25,monInch:21.5,monTilt:6,monOffset:0,printer:"desk"};
+  deskDepth:500,counterDepth:330,overhang:150,width:1800,topThk:30,deskThk:25,monInch:21.5,monTilt:6,monOffset:0,printer:"desk"};
 let S=Object.assign({},DEF);
 try{const j=localStorage.getItem("counter-sim");if(j)S=Object.assign(S,JSON.parse(j));}catch(e){}
 if(["desk","counter","none"].indexOf(S.printer)<0)S.printer="desk";
 if(typeof S.overhang!=="number")S.overhang=DEF.overhang;
+if(typeof S.width!=="number")S.width=DEF.width;
 const PRN={d:380,h:300,clear:420};
 const save=()=>{try{localStorage.setItem("counter-sim",JSON.stringify(S));}catch(e){}};
 
@@ -261,9 +288,8 @@ function layout(st){
   const a=anthro(st.staffH),p=anthro(st.patientH);
   const seat=st.seatAuto?seatFor(st.staffH):st.seatH;
   const under=st.deskH-st.deskThk;
-  let kneeX=Math.min(-60,-st.deskDepth+120);
-  if(st.printer==="desk")kneeX=Math.min(kneeX,-(PRN.clear+40));
-  const toeX=st.printer==="desk"?Math.min(kneeX+150,-(PRN.clear+10)):kneeX+150;
+  const kneeX=Math.min(-60,-st.deskDepth+120);
+  const toeX=kneeX+150;
   const hipX=kneeX-a.bk;
   const staff={a:a,seat:seat,under:under,kneeX:kneeX,hipX:hipX,
     hip:{x:hipX,y:seat+a.thigh*.5},knee:{x:kneeX,y:a.knee},
@@ -340,6 +366,11 @@ function metrics(st){
   M.staff.push({t:"天板下 膝高クリアランス",n:r0(kneeC),u:"mm",m:"20mm以上",j:grade(kneeC,40,900,15,900),key:"knee"});
   const monTopRel=mon.top-sf.eyeH;
   M.staff.push({t:"モニター上端 − 目線高",n:(monTopRel>0?"+":"")+r0(monTopRel),u:"mm",m:"目線以下（0以下）が最適",j:grade(monTopRel,-350,0,-450,60),key:"montop"});
+  const und=st.counterH-st.topThk,ex=Math.max(200,-sf.eye.x);
+  const yClear=sf.eyeH>und?und-(sf.eyeH-und)*st.overhang/Math.max(60,ex-st.overhang):9999;
+  const hidTop=Math.max(0,mon.top-yClear);
+  M.staff.push({t:"持ち出しの陰で見えない画面上部",n:r0(hidTop),u:"mm",
+    m:"0mm が理想（天板手前端が視線を切る量）",j:grade(hidTop,0,15,0,45),key:"hidtop"});
   const ang=Math.atan2(sf.eyeH-(mon.bottom+mon.vert/2),mon.dist)*180/Math.PI;
   M.staff.push({t:"モニター中心への俯角",n:r0(ang),u:"°",m:"10〜35°が最適",j:grade(ang,10,35,0,45),key:"angle"});
   M.staff.push({t:"視距離（目〜画面）",n:r0(mon.dist),u:"mm",m:"500〜800mm",j:grade(mon.dist,500,800,420,950),key:"dist"});
@@ -374,8 +405,10 @@ function metrics(st){
   M.patient.push({t:"足元のクリアランス",n:r0(toe),u:"mm",m:toeM,j:grade(toe,0,3000,-40,3000),key:"toe"});
 
   if(st.printer==="desk"){
-    const legroom=st.deskDepth-PRN.clear;
-    M.staff.push({t:"プリンター設置後の足入れ奥行",n:r0(legroom),u:"mm",m:"450mm以上（デスク奥行 − プリンター420）",j:grade(legroom,450,3000,390,3000),key:"legroom"});
+    const freeW=st.width-460;
+    M.staff.push({t:"プリンターを避けて座れる間口",n:r0(freeW),u:"mm",m:"700mm以上（間口 − プリンター460）",j:grade(freeW,700,9000,600,9000),key:"freew"});
+    const fitD=st.deskDepth-400;
+    M.staff.push({t:"プリンターがデスク下に収まる奥行",n:(fitD>0?"+":"")+r0(fitD),u:"mm",m:"0以上（脚元へはみ出さない）",j:grade(fitD,0,3000,-60,3000),key:"prnd"});
   }
   M.common.push({t:"LCD有効高（段差）",n:r0(mon.gap),u:"mm",m:"= カウンター高 − 天板厚 − デスク高",j:G(mon.gap>=mon.vert?"good":"bad",mon.gap>=mon.vert?"確保":"不足"),key:"gap"});
   M.common.push({t:"モニター必要高 vs 余裕",n:(mon.slack>0?"+":"")+r0(mon.slack),u:"mm",m:st.monInch+"型＝本体 "+r0(mon.h)+"mm／傾斜後 "+r0(mon.vert)+"mm",j:grade(mon.slack,25,3000,0,3000),key:"slack"});
@@ -445,6 +478,7 @@ function draw(st,M){
    +'.floor{stroke:var(--ink);stroke-width:6;fill:none}.hatch{stroke:var(--ink3);stroke-width:3;fill:none}'
    +'.equip{fill:none;stroke:var(--equip);stroke-width:6;stroke-linejoin:round}'
    +'.equipf{fill:var(--equip);opacity:.10;stroke:none}'
+   +'.equipd{fill:none;stroke:var(--equip);stroke-width:5;stroke-dasharray:22 14;opacity:.8}'
    +'.kiosk{fill:none;stroke:var(--kiosk);stroke-width:6;stroke-linejoin:round}'
    +'.kioskf{fill:var(--kiosk);opacity:.12;stroke:none}'
    +'.staff{stroke:var(--staff)}.patient{stroke:var(--patient)}'
@@ -476,7 +510,7 @@ function draw(st,M){
   s+=rc(-230,st.deskH-st.deskThk-70,-60,st.deskH-st.deskThk-18,"equipf")+rc(-230,st.deskH-st.deskThk-70,-60,st.deskH-st.deskThk-18,"equip");
   s+=tx(-250,st.deskH-st.deskThk-60,"PC","lbl sm","end");
   if(st.printer==="counter"){s+=rc(100,0,100+PRN.d,PRN.h,"equipf")+rc(100,0,100+PRN.d,PRN.h,"equip")+tx(112,PRN.h+40,"プリンター","lbl sm");}
-  else if(st.printer==="desk"){s+=rc(-PRN.clear+20,0,-40,PRN.h,"equipf")+rc(-PRN.clear+20,0,-40,PRN.h,"equip")+tx(-PRN.clear+20,PRN.h+40,"プリンター","lbl sm");}
+  else if(st.printer==="desk"){s+=rc(-PRN.clear+20,0,-40,PRN.h,"equipd")+tx(-PRN.clear+20,PRN.h+40,"プリンター（間口方向にずらして配置）","lbl sm");}
   s+=ln(sf.hipX-100,sf.seat,sf.kneeX-40,sf.seat,"woodl")+ln(sf.hipX-100,sf.seat,sf.hipX-100,sf.seat+400,"woodl")+ln(sf.hipX-70,0,sf.hipX-70,sf.seat,"woodl");
   s+=figure(sf,"staff");
   if(pt.wheel){
@@ -512,6 +546,7 @@ const CTL=[
  {g:"c-depth",k:"deskDepth",l:"デスク奥行",min:350,max:750,step:10,u:"mm"},
  {g:"c-depth",k:"counterDepth",l:"カウンター天板奥行（患者側）",min:200,max:600,step:10,u:"mm"},
  {g:"c-depth",k:"overhang",l:"天板の持ち出し（スタッフ側）",min:0,max:350,step:10,u:"mm"},
+ {g:"c-depth",k:"width",l:"間口（カウンターの幅）",min:900,max:3000,step:50,u:"mm"},
  {g:"c-depth",k:"topThk",l:"カウンター天板厚",min:15,max:80,step:5,u:"mm"},
  {g:"c-depth",k:"deskThk",l:"デスク天板厚",min:15,max:60,step:5,u:"mm"},
  {g:"c-mon",k:"monInch",l:"モニターサイズ",min:17,max:27,step:.5,u:"型"},
@@ -618,6 +653,10 @@ function render(){
     b.setAttribute("aria-pressed",p.staffH===S.staffH&&p.patientH===S.patientH&&p.posture===S.posture);});
   const M=metrics(S);
   const dr=draw(S,M);$("#section").innerHTML=dr.s;$("#section").setAttribute("viewBox",dr.vb);
+  $("#view2d").hidden=V.mode!=="2d";$("#view3d").hidden=V.mode!=="3d";
+  $("#cams").hidden=V.mode!=="3d";$("#solidwrap").hidden=V.mode!=="3d";
+  Array.prototype.forEach.call($("#views").children,b=>b.setAttribute("aria-pressed",b.dataset.v===V.mode));
+  if(V.mode==="3d")draw3D(M);
   $("#verdicts").innerHTML=vcard("スタッフ側（座位）","seated",M.staff)
    +vcard("患者側（"+(S.posture==="wheel"?"車いす":"立位")+"）","standing",M.patient)
    +vcard("段差・LCD・視線","shared",M.common);
@@ -631,6 +670,253 @@ function render(){
   ].map(t=>'<div class="tile"><span class="k">'+t.k+'</span><b>'+t.v+'<span>'+t.u+'</span></b><span class="s">'+t.s+'</span></div>').join("");
   tableStaff();tablePatient();
 }
+/* ================= 3Dビュー（自前レンダラ・依存なし） ================= */
+const cv=$("#c3"),g3=cv.getContext("2d");
+const V={mode:"2d",az:-2.30,el:.15,dist:3500,tgt:{x:20,y:850,z:0},eyeOf:null,yaw:0,pitch:0,solid:true};
+const sub=(a,b)=>({x:a.x-b.x,y:a.y-b.y,z:a.z-b.z});
+const add=(a,b)=>({x:a.x+b.x,y:a.y+b.y,z:a.z+b.z});
+const dot=(a,b)=>a.x*b.x+a.y*b.y+a.z*b.z;
+const cross=(a,b)=>({x:a.y*b.z-a.z*b.y,y:a.z*b.x-a.x*b.z,z:a.x*b.y-a.y*b.x});
+const norm=a=>{const l=Math.hypot(a.x,a.y,a.z)||1;return{x:a.x/l,y:a.y/l,z:a.z/l};};
+function cssRGB(name,fb){
+  const v=getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  let m=/^#([0-9a-fA-F]{6})$/.exec(v);
+  if(m){const n=parseInt(m[1],16);return[n>>16&255,n>>8&255,n&255];}
+  m=/rgba?\(([^)]+)\)/.exec(v);
+  if(m){const a=m[1].split(",").map(parseFloat);return[a[0]|0,a[1]|0,a[2]|0];}
+  return fb;
+}
+const cl255=v=>v<0?0:v>255?255:v|0;
+const rgb=(c,k)=>"rgb("+cl255(c[0]*k)+","+cl255(c[1]*k)+","+cl255(c[2]*k)+")";
+const rgba=(c,a)=>"rgba("+cl255(c[0])+","+cl255(c[1])+","+cl255(c[2])+","+a+")";
+const mix=(a,b,t)=>[a[0]+(b[0]-a[0])*t,a[1]+(b[1]-a[1])*t,a[2]+(b[2]-a[2])*t];
+const NEAR=80,LIGHT=norm({x:-.35,y:.86,z:.38});
+
+function camBasis(){
+  let eye,look,fov;
+  if(V.eyeOf){
+    const L=layout(S),who=V.eyeOf==="patient"?L.patient:L.staff;
+    eye={x:who.eye.x,y:who.eye.y,z:0};
+    look=add(eye,{x:Math.cos(V.pitch)*Math.sin(V.yaw),y:Math.sin(V.pitch),z:Math.cos(V.pitch)*Math.cos(V.yaw)});
+    fov=1.15;
+  }else{
+    eye={x:V.tgt.x+V.dist*Math.cos(V.el)*Math.sin(V.az),y:V.tgt.y+V.dist*Math.sin(V.el),z:V.tgt.z+V.dist*Math.cos(V.el)*Math.cos(V.az)};
+    look=V.tgt;fov=.62;
+  }
+  const f=norm(sub(look,eye)),r=norm(cross(f,{x:0,y:1,z:0}));
+  return{eye:eye,r:r,u:cross(r,f),f:f,fov:fov};
+}
+const toCam=(p,C)=>{const d=sub(p,C.eye);return{x:dot(d,C.r),y:dot(d,C.u),z:dot(d,C.f)};};
+function clipNear(pts){
+  const out=[];
+  for(let i=0;i<pts.length;i++){
+    const a=pts[i],b=pts[(i+1)%pts.length],ai=a.z>=NEAR,bi=b.z>=NEAR;
+    if(ai)out.push(a);
+    if(ai!==bi){const t=(NEAR-a.z)/(b.z-a.z);out.push({x:a.x+(b.x-a.x)*t,y:a.y+(b.y-a.y)*t,z:NEAR});}
+  }
+  return out;
+}
+function clipSeg(a,b){
+  if(a.z>=NEAR&&b.z>=NEAR)return[a,b];
+  if(a.z<NEAR&&b.z<NEAR)return null;
+  const t=(NEAR-a.z)/(b.z-a.z),p={x:a.x+(b.x-a.x)*t,y:a.y+(b.y-a.y)*t,z:NEAR};
+  return a.z>=NEAR?[a,p]:[p,b];
+}
+
+/* --- 立体の組み立て --- */
+function scene3(){
+  const st=S,L=layout(st),sf=L.staff,pt=L.patient,mon=L.mon;
+  const W=st.width,hw=W/2,cd=st.counterDepth,oh=st.overhang,ch=st.counterH,dd=st.deskDepth;
+  const C={wood:cssRGB("--wood",[123,90,60]),equip:cssRGB("--equip",[30,127,168]),
+    kiosk:cssRGB("--kiosk",[47,125,79]),staff:cssRGB("--staff",[142,60,140]),
+    patient:cssRGB("--patient",[198,62,123])};
+  const tiles=[],lines=[],heads=[];
+  const lerp=(a,b,t)=>({x:a.x+(b.x-a.x)*t,y:a.y+(b.y-a.y)*t,z:a.z+(b.z-a.z)*t});
+  const dist=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y,a.z-b.z);
+  const TILE=340;
+  function box(x0,x1,y0,y1,z0,z1,col,rot){
+    const cx=(x0+x1)/2,cy=(y0+y1)/2,co=Math.cos(rot||0),si=Math.sin(rot||0);
+    const v=[[x0,y0,z0],[x1,y0,z0],[x1,y1,z0],[x0,y1,z0],[x0,y0,z1],[x1,y0,z1],[x1,y1,z1],[x0,y1,z1]]
+      .map(q=>{const dx=q[0]-cx,dy=q[1]-cy;return{x:cx+dx*co-dy*si,y:cy+dx*si+dy*co,z:q[2]};});
+    const ctr={x:cx,y:cy,z:(z0+z1)/2};
+    [[0,1,2,3],[4,5,6,7],[0,3,7,4],[1,2,6,5],[3,2,6,7],[0,1,5,4]].forEach(f=>{
+      const A=v[f[0]],B=v[f[1]],Cc=v[f[2]],D=v[f[3]];
+      const fc={x:(A.x+Cc.x)/2,y:(A.y+Cc.y)/2,z:(A.z+Cc.z)/2};
+      const nw=norm(sub(fc,ctr));
+      const nu=Math.max(1,Math.ceil(dist(A,B)/TILE)),nv=Math.max(1,Math.ceil(dist(B,Cc)/TILE));
+      for(let i=0;i<nu;i++)for(let j=0;j<nv;j++){
+        const u0=i/nu,u1=(i+1)/nu,w0=j/nv,w1=(j+1)/nv;
+        const q=(u,w)=>lerp(lerp(A,B,u),lerp(D,Cc,u),w);
+        const p=[q(u0,w0),q(u1,w0),q(u1,w1),q(u0,w1)];
+        tiles.push({v:p,n:nw,c:col,ctr:{x:(p[0].x+p[2].x)/2,y:(p[0].y+p[2].y)/2,z:(p[0].z+p[2].z)/2},
+          e:[j===0,i===nu-1,j===nv-1,i===0]});
+      }
+    });
+  }
+  const seg=(a,b,col,w)=>lines.push({a:a,b:b,c:col,w:w||18});
+  function ring(cx,cy,z,r,col){
+    const p=[];for(let i=0;i<20;i++){const t=i/20*Math.PI*2;p.push({x:cx+r*Math.cos(t),y:cy+r*Math.sin(t),z:z});}
+    for(let i=0;i<20;i++)seg(p[i],p[(i+1)%20],col,14);
+  }
+  const P=(x,y,z)=>({x:x,y:y,z:z});
+  /* 什器 */
+  box(-oh,cd,ch-st.topThk,ch,-hw,hw,C.wood);
+  box(0,100,0,ch-st.topThk,-hw,hw,C.wood);
+  box(-dd,0,st.deskH-st.deskThk,st.deskH,-hw,hw,C.wood);
+  box(-dd,0,0,st.deskH-st.deskThk,-hw,-hw+25,C.wood);
+  box(-dd,0,0,st.deskH-st.deskThk,hw-25,hw,C.wood);
+  if(cd>140){box(100,cd,0,ch-st.topThk,-hw,-hw+25,C.wood);box(100,cd,0,ch-st.topThk,hw-25,hw,C.wood);}
+  /* 設備 */
+  const monW=st.monInch*22.1+24;
+  box(-45,0,mon.top-mon.vert,mon.top,-monW/2,monW/2,C.equip,-st.monTilt*Math.PI/180);
+  box(25,175,ch,ch+230,Math.max(-hw+40,hw-620),Math.max(-hw+190,hw-470),C.kiosk);
+  box(-230,-60,st.deskH-st.deskThk-190,st.deskH-st.deskThk-20,-hw+140,Math.min(hw,-hw+300),C.equip);
+  if(st.printer==="desk")box(-PRN.clear+20,-40,0,PRN.h,-hw+60,Math.min(hw,-hw+520),C.equip);
+  if(st.printer==="counter")box(100,100+PRN.d,0,PRN.h,Math.max(-hw,hw-520),hw-60,C.equip);
+  /* 椅子 */
+  const cs=sf.seat;
+  box(sf.hipX-110,sf.hipX+370,cs-60,cs,-230,230,C.wood);
+  box(sf.hipX-110,sf.hipX-60,cs,cs+400,-190,190,C.wood);
+  box(sf.hipX-90,sf.hipX-40,0,cs-60,-45,45,C.wood);
+  /* 人 */
+  function person(f,col,skip){
+    if(skip)return;
+    [-110,110].forEach(z=>{
+      seg(P(f.hip.x,f.hip.y,z*.75),P(f.knee.x,f.knee.y,z),col,28);
+      seg(P(f.knee.x,f.knee.y,z),P(f.ankle.x,f.ankle.y,z),col,25);
+      seg(P(f.ankle.x,f.ankle.y,z),P(f.toe.x,f.toe.y,z),col,20);
+    });
+    seg(P(f.hip.x,f.hip.y,0),P(f.shoulder.x,f.shoulder.y,0),col,52);
+    seg(P(f.shoulder.x,f.shoulder.y,-150),P(f.shoulder.x,f.shoulder.y,150),col,26);
+    [-155,155].forEach(z=>{
+      seg(P(f.shoulder.x,f.shoulder.y,z),P(f.elbow.x,f.elbow.y,z),col,21);
+      seg(P(f.elbow.x,f.elbow.y,z),P(f.hand.x,f.hand.y,z*.55),col,18);
+    });
+    heads.push({c:P(f.head.x,f.head.y,0),r:f.head.r,col:col});
+  }
+  person(sf,C.staff,V.eyeOf==="staff");
+  if(pt.wheel){
+    box(pt.bodyX-210,pt.bodyX+150,WHEEL_SEAT-60,WHEEL_SEAT,-230,230,C.wood);
+    box(pt.bodyX+150,pt.bodyX+200,WHEEL_SEAT,WHEEL_SEAT+430,-200,200,C.wood);
+    ring(pt.bodyX+60,300,-290,300,C.wood);ring(pt.bodyX+60,300,290,300,C.wood);
+  }
+  person(pt,C.patient,V.eyeOf==="patient");
+  return{tiles:tiles,lines:lines,heads:heads,L:L};
+}
+
+/* --- 描画 --- */
+function draw3D(M){
+  const w=cv.clientWidth||900,h=cv.clientHeight||520,dpr=Math.min(2,window.devicePixelRatio||1);
+  if(cv.width!==Math.round(w*dpr)||cv.height!==Math.round(h*dpr)){cv.width=Math.round(w*dpr);cv.height=Math.round(h*dpr);}
+  g3.setTransform(dpr,0,0,dpr,0,0);
+  const bg=cssRGB("--card",[248,249,246]),ink=cssRGB("--ink",[27,35,32]),ink3=cssRGB("--ink3",[138,147,142]);
+  g3.fillStyle=rgb(bg,1);g3.fillRect(0,0,w,h);
+  const C=camBasis(),sc=(h/2)/Math.tan(C.fov/2);
+  const pr=p=>({x:w/2+p.x*sc/p.z,y:h/2-p.y*sc/p.z});
+  /* 床グリッド */
+  g3.lineWidth=1;g3.strokeStyle=rgba(ink3,.4);g3.beginPath();
+  const gl=[];
+  for(let x=-3200;x<=3200;x+=400)gl.push([{x:x,y:0,z:-2800},{x:x,y:0,z:2800}]);
+  for(let z=-2800;z<=2800;z+=400)gl.push([{x:-3200,y:0,z:z},{x:3200,y:0,z:z}]);
+  gl.forEach(s=>{const q=clipSeg(toCam(s[0],C),toCam(s[1],C));if(!q)return;
+    const a=pr(q[0]),b=pr(q[1]);g3.moveTo(a.x,a.y);g3.lineTo(b.x,b.y);});
+  g3.stroke();
+  /* 描画単位を奥から */
+  const SC=scene3(),units=[];
+  SC.tiles.forEach(t=>{
+    if(dot(t.n,sub(t.ctr,C.eye))>0)return;
+    const cc=toCam(t.ctr,C);
+    if(cc.z<-600)return;
+    units.push({key:cc.z,kind:"tile",t:t});
+  });
+  SC.lines.forEach(l=>{
+    const q=clipSeg(toCam(l.a,C),toCam(l.b,C));if(!q)return;
+    units.push({key:Math.min(q[0].z,q[1].z),kind:"line",l:l,q:q});
+  });
+  SC.heads.forEach(hd=>{
+    const c=toCam(hd.c,C);if(c.z<NEAR)return;
+    units.push({key:c.z,kind:"head",hd:hd,c:c});
+  });
+  units.sort((a,b)=>b.key-a.key);
+  units.forEach(o=>{
+    if(o.kind==="tile"){
+      const t=o.t,cam=t.v.map(p=>toCam(p,C)),cl=clipNear(cam);
+      if(cl.length<3)return;
+      const pts=cl.map(pr),sh=.72+.34*Math.max(0,dot(t.n,LIGHT));
+      const fill=rgb(mix(t.c,bg,.58),sh);
+      g3.beginPath();pts.forEach((p,i)=>i?g3.lineTo(p.x,p.y):g3.moveTo(p.x,p.y));g3.closePath();
+      if(V.solid){g3.fillStyle=fill;g3.fill();g3.lineWidth=1;g3.strokeStyle=fill;g3.stroke();}
+      if(cl.length===4){
+        g3.lineWidth=1.1;g3.strokeStyle=rgb(t.c,V.solid?.85:1);
+        g3.beginPath();
+        for(let i=0;i<4;i++)if(t.e[i]){const a=pts[i],b=pts[(i+1)%4];g3.moveTo(a.x,a.y);g3.lineTo(b.x,b.y);}
+        g3.stroke();
+      }
+    }else if(o.kind==="line"){
+      const a=pr(o.q[0]),b=pr(o.q[1]),d=(o.q[0].z+o.q[1].z)/2;
+      g3.beginPath();g3.moveTo(a.x,a.y);g3.lineTo(b.x,b.y);
+      g3.lineWidth=Math.max(1.4,o.l.w*sc/d);g3.lineCap="round";g3.strokeStyle=rgb(o.l.c,1);g3.stroke();
+    }else{
+      const p=pr(o.c),r=Math.max(2.5,o.hd.r*sc/o.c.z);
+      g3.beginPath();g3.arc(p.x,p.y,r,0,7);
+      g3.fillStyle=rgb(bg,1);g3.fill();
+      g3.lineWidth=Math.max(1.5,16*sc/o.c.z);g3.strokeStyle=rgb(o.hd.col,1);g3.stroke();
+    }
+  });
+  /* 視線 */
+  if(!V.eyeOf){
+    const L=SC.L,pe={x:L.patient.eye.x,y:L.patient.eye.y,z:0},se={x:L.staff.eye.x,y:L.staff.eye.y,z:0};
+    const mt={x:0,y:L.mon.top,z:0};
+    [[pe,se,rgba(ink,.55),[9,7]],
+     [pe,mt,rgb(M.sight.hidden?cssRGB("--good",[44,122,88]):cssRGB("--bad",[178,58,46]),1),[]]]
+    .forEach(l=>{const q=clipSeg(toCam(l[0],C),toCam(l[1],C));if(!q)return;
+      const a=pr(q[0]),b=pr(q[1]);g3.save();g3.setLineDash(l[3]);g3.lineWidth=2;g3.strokeStyle=l[2];
+      g3.beginPath();g3.moveTo(a.x,a.y);g3.lineTo(b.x,b.y);g3.stroke();g3.restore();});
+  }
+  /* HUD */
+  g3.font='500 12px "IBM Plex Mono",ui-monospace,monospace';
+  g3.fillStyle=rgb(ink,1);
+  ["デスク "+S.deskH+" ／ カウンター "+S.counterH+" ／ 段差 "+r0(M.L.mon.gap),
+   "持ち出し "+S.overhang+" ／ 間口 "+S.width+" ／ 什器奥行 "+(S.deskDepth+S.counterDepth)]
+   .forEach((t,i)=>g3.fillText(t,12,h-26+i*15));
+  g3.fillStyle=rgba(ink3,1);
+  g3.fillText(V.eyeOf?(V.eyeOf==="patient"?"患者の目線／ドラッグで見回す":"スタッフの目線／ドラッグで見回す")
+                     :"ドラッグで回転・ホイールで拡大",12,20);
+}
+
+/* --- 操作 --- */
+let drag=null;
+cv.addEventListener("pointerdown",e=>{drag={x:e.clientX,y:e.clientY};try{cv.setPointerCapture(e.pointerId);}catch(err){}});
+cv.addEventListener("pointermove",e=>{
+  if(!drag)return;
+  const dx=(e.clientX-drag.x)/190,dy=(e.clientY-drag.y)/190;drag={x:e.clientX,y:e.clientY};
+  if(V.eyeOf){V.yaw-=dx;V.pitch=clamp(V.pitch-dy,-1.1,1.1);}
+  else{V.az-=dx;V.el=clamp(V.el+dy,-.2,1.35);}
+  render();
+});
+["pointerup","pointercancel","pointerleave"].forEach(t=>cv.addEventListener(t,()=>{drag=null;}));
+cv.addEventListener("wheel",e=>{if(V.eyeOf)return;e.preventDefault();
+  V.dist=clamp(V.dist*(1+(e.deltaY>0?.12:-.12)),1500,11000);render();},{passive:false});
+$("#views").addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;V.mode=b.dataset.v;render();});
+$("#cams").addEventListener("click",e=>{
+  const b=e.target.closest("button");if(!b)return;const L=layout(S),c=b.dataset.c;
+  if(c==="patient"||c==="staff"){
+    V.eyeOf=c;
+    const me=c==="patient"?L.patient:L.staff,other=c==="patient"?L.staff:L.patient;
+    const dx=other.eye.x-me.eye.x,dy=other.eye.y-me.eye.y;
+    V.yaw=dx<0?-Math.PI/2:Math.PI/2;
+    V.pitch=c==="staff"?-.08:clamp(Math.atan2(dy,Math.abs(dx)),-1.1,1.1);
+  }else{
+    V.eyeOf=null;
+    if(c==="side"){V.az=0;V.el=.06;V.dist=4100;}
+    else if(c==="front"){V.az=1.35;V.el=.26;V.dist=3900;}
+    else{V.az=-2.30;V.el=.15;V.dist=3500;}
+  }
+  render();
+});
+$("#solid").addEventListener("change",e=>{V.solid=e.target.checked;render();});
+if(window.ResizeObserver)new ResizeObserver(()=>{if(V.mode==="3d")render();}).observe(cv);
+
 render();
 })();
 </script>
